@@ -228,7 +228,7 @@ func (b *Bridge) newService(port ServicePort, isgroup bool) *Service {
 	service := new(Service)
 	service.Origin = port
 	service.ID = reverse(container.Name[1:])
-	log.Println("The service ID is ", service.ID)
+
 	if b.config.UseImageName {
 		service.Name = defaultName
 	} else {

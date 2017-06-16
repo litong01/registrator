@@ -70,7 +70,11 @@ func (r *Skydns2Adapter) Services() ([]*bridge.Service, error) {
 }
 
 func (r *Skydns2Adapter) servicePath(service *bridge.Service) string {
-	return r.path + "/" + service.Name + "/" + service.ID
+    if service.Name == "" {
+    	return r.path + "/" + service.ID
+    } else {
+		return r.path + "/" + service.Name + "/" + service.ID
+	}
 }
 
 func domainPath(domain string) string {
