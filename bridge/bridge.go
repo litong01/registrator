@@ -3,12 +3,10 @@ package bridge
 import (
 	"errors"
 	"log"
-	"net"
 	"net/url"
 	"os"
 	"path"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 
@@ -198,136 +196,37 @@ func (b *Bridge) add(containerId string, quiet bool) {
 		return
 	}
 
-	ports := make(map[string]ServicePort)
-
-	// Extract configured host port mappings, relevant when using --net=host
-	for port, _ := range container.Config.ExposedPorts {
-		published := []dockerapi.PortBinding{ {"0.0.0.0", port.Port()}, }
-		ports[string(port)] = servicePort(container, port, published)
-	}
-
-	// Extract runtime port mappings, relevant when using --net=bridge
-	for port, published := range container.NetworkSettings.Ports {
-		ports[string(port)] = servicePort(container, port, published)
-	}
-
-	servicePorts := make(map[string]ServicePort)
-	for key, port := range ports {
-		if b.config.Internal != true && port.HostPort == "" {
-			if !quiet {
-				log.Println("ignored:", container.ID[:12], "port", port.ExposedPort, "not published on host")
-			}
-			continue
-		}
-		servicePorts[key] = port
-	}
-
-	isGroup := len(servicePorts) > 1
-	for _, port := range servicePorts {
-		service := b.newService(port, isGroup)
-		if service == nil {
-			if !quiet {
-				log.Println("ignored:", container.ID[:12], "service on port", port.ExposedPort)
-			}
-			continue
-		}
+	published := []dockerapi.PortBinding{ {container.NetworkSettings.IPAddress, ""}, }
+	port := dockerapi.Port("0/tcp")
+    service := b.newService(servicePort(container, port, published), false)
+    if service != nil {
 		err := b.registry.Register(service)
 		if err != nil {
 			log.Println("register failed:", service, err)
-			continue
+		} else {
+			b.services[container.ID] = append(b.services[container.ID], service)
+			log.Println("added:", container.ID[:12], service.ID)
 		}
-		b.services[container.ID] = append(b.services[container.ID], service)
-		log.Println("added:", container.ID[:12], service.ID)
-	}
+    } else {
+    	log.Println("service is nil, this should not be possible!")
+    }
 }
 
 func (b *Bridge) newService(port ServicePort, isgroup bool) *Service {
 	container := port.container
 	defaultName := strings.Split(path.Base(container.Config.Image), ":")[0]
 
-	// not sure about this logic. kind of want to remove it.
-	hostname := Hostname
-	if hostname == "" {
-		hostname = port.HostIP
-	}
-	if port.HostIP == "0.0.0.0" {
-		ip, err := net.ResolveIPAddr("ip", hostname)
-		if err == nil {
-			port.HostIP = ip.String()
-		}
-	}
-
-	if b.config.HostIp != "" {
-		port.HostIP = b.config.HostIp
-	}
-
-	metadata, metadataFromPort := serviceMetaData(container.Config, port.ExposedPort)
-
-	ignore := mapDefault(metadata, "ignore", "")
-	if ignore != "" {
-		return nil
-	}
-
 	service := new(Service)
 	service.Origin = port
-	// service.ID = hostname + ":" + container.Name[1:] + ":" + port.ExposedPort
 	service.ID = container.Name[1:]
 
-	service.Name = mapDefault(metadata, "name", defaultName)
-	if isgroup && !metadataFromPort["name"] {
-		service.Name += "-" + port.ExposedPort
-	}
-	var p int
-
-	if b.config.Internal == true {
-		service.IP = port.ExposedIP
-		p, _ = strconv.Atoi(port.ExposedPort)
-	} else {
-		service.IP = port.HostIP
-		p, _ = strconv.Atoi(port.HostPort)
-	}
-	service.Port = p
-
-	if b.config.UseIpFromLabel != "" {
-		containerIp := container.Config.Labels[b.config.UseIpFromLabel]
-		if containerIp != "" {
-			slashIndex := strings.LastIndex(containerIp, "/")
-			if slashIndex > -1 {
-				service.IP = containerIp[:slashIndex]
-			} else {
-				service.IP = containerIp
-			}
-			log.Println("using container IP " + service.IP + " from label '" +
-				b.config.UseIpFromLabel  + "'")
-		} else {
-			log.Println("Label '" + b.config.UseIpFromLabel +
-				"' not found in container configuration")
-		}
-	}
-
-	// NetworkMode can point to another container (kuberenetes pods)
-	networkMode := container.HostConfig.NetworkMode
-	if networkMode != "" {
-		if strings.HasPrefix(networkMode, "container:") {
-			networkContainerId := strings.Split(networkMode, ":")[1]
-			log.Println(service.Name + ": detected container NetworkMode, linked to: " + networkContainerId[:12])
-			networkContainer, err := b.docker.InspectContainer(networkContainerId)
-			if err != nil {
-				log.Println("unable to inspect network container:", networkContainerId[:12], err)
-			} else {
-				service.IP = networkContainer.NetworkSettings.IPAddress
-				log.Println(service.Name + ": using network container IP " + service.IP)
-			}
-		}
-	}
-
+	service.Name = defaultName
+	service.IP = port.HostIP
+	service.Port = 0
+	
+	metadata, _ := serviceMetaData(container.Config, "nothing")
 	service.Tags = combineTags(
 		mapDefault(metadata, "tags", ""), b.config.ForceTags)
-
-	id := mapDefault(metadata, "id", "")
-	if id != "" {
-		service.ID = id
-	}
 
 	delete(metadata, "id")
 	delete(metadata, "tags")
