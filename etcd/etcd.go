@@ -84,8 +84,13 @@ func (r *EtcdAdapter) syncEtcdCluster() {
 
 func (r *EtcdAdapter) Register(service *bridge.Service) error {
 	r.syncEtcdCluster()
-
-	path := r.path + "/" + service.Name + "/" + service.ID
+    var path string
+    if service.Name == "" {
+     	path = r.path + "/" + service.ID
+    } else {
+    	path = r.path + "/" + service.Name + "/" + service.ID
+    }
+		
 	port := strconv.Itoa(service.Port)
 	addr := net.JoinHostPort(service.IP, port)
 
@@ -104,8 +109,12 @@ func (r *EtcdAdapter) Register(service *bridge.Service) error {
 
 func (r *EtcdAdapter) Deregister(service *bridge.Service) error {
 	r.syncEtcdCluster()
-
-	path := r.path + "/" + service.Name + "/" + service.ID
+    var path string
+    if service.Name == "" {
+     	path = r.path + "/" + service.ID
+    } else {
+    	path = r.path + "/" + service.ID
+    }
 
 	var err error
 	if r.client != nil {

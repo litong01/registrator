@@ -24,6 +24,15 @@ type Bridge struct {
 	config         Config
 }
 
+func reverse(input string) string {
+    s := strings.Split(input, ".")
+    for i := len(s)/2-1; i >= 0; i-- {
+		opp := len(s)-1-i
+		s[i], s[opp] = s[opp], s[i]
+    }
+    return strings.Join(s, "/")
+}
+
 func New(docker *dockerapi.Client, adapterUri string, config Config) (*Bridge, error) {
 	uri, err := url.Parse(adapterUri)
 	if err != nil {
@@ -218,9 +227,14 @@ func (b *Bridge) newService(port ServicePort, isgroup bool) *Service {
 
 	service := new(Service)
 	service.Origin = port
-	service.ID = container.Name[1:]
+	service.ID = reverse(container.Name[1:])
+	log.Println("The service ID is ", service.ID)
+	if b.config.UseImageName {
+		service.Name = defaultName
+	} else {
+		service.Name = ""
+	}
 
-	service.Name = defaultName
 	service.IP = port.HostIP
 	service.Port = 0
 	
